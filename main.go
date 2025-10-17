@@ -1,20 +1,7 @@
-// SPDX-License-Identifier: Apache-2.0
-// SPDX-FileCopyrightText: 2015 Martin Lindhe
-// SPDX-FileCopyrightText: 2016 The Ebitengine Authors
-//
-// The original project is gol (https://github.com/martinlindhe/gol) by Martin Lindhe.
-// This file modifies that example to:
-//  - run fullscreen
-//  - use a configurable CellSize (default 32)
-//  - slowly shift through rainbow hues per generation
-//  - fade out dead cells over 5 generations (ghost trail)
-//  - handle restart on any input
-//
-// Modified by: Nick Golebiewski and ChatGPT
-
 package main
 
 import (
+	"fmt"
 	"image/color"
 	"log"
 	"math"
@@ -22,19 +9,18 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 )
-
-// ------------------------ Config ------------------------
 
 const (
 	CellSize            = 32
 	InitialLiveFraction = 0.50
-	FadeGenerations     = 5 // how many generations ghosts persist
+	MaxTrails           = 100
+	FadeGenerations     = 5
+	UpdatesPerSecond    = 8
+	KeyCooldownMs       = 150
 )
 
-// ------------------------ Helpers ------------------------
-
-// hsvToRGB converts hue-saturation-value (HSV) to RGB.
 func hsvToRGB(h, s, v float64) (r, g, b uint8) {
 	h = math.Mod(h, 360)
 	c := v * s
@@ -61,40 +47,40 @@ func hsvToRGB(h, s, v float64) (r, g, b uint8) {
 	return
 }
 
-// ------------------------ World ------------------------
-
 type World struct {
-	live       []bool  // live cells
-	fadeLevels []uint8 // how many generations since death (0–FadeGenerations)
+	live       []bool
+	fadeLevels []uint8
 	width      int
 	height     int
+	gen        int
 }
 
-// NewWorld creates a new world.
-func NewWorld(width, height int, maxInitLiveCells int) *World {
+func NewWorld(width, height, maxLive int) *World {
 	w := &World{
 		live:       make([]bool, width*height),
 		fadeLevels: make([]uint8, width*height),
 		width:      width,
 		height:     height,
+		gen:        0,
 	}
-	w.init(maxInitLiveCells)
+	w.init(maxLive)
 	return w
 }
 
-func (w *World) init(maxLiveCells int) {
-	if maxLiveCells <= 0 {
-		maxLiveCells = int(float64(w.width*w.height) * InitialLiveFraction)
+func (w *World) init(maxLive int) {
+	if maxLive <= 0 {
+		maxLive = int(float64(w.width*w.height) * InitialLiveFraction)
 	}
-	for i := 0; i < len(w.live); i++ {
+	for i := range w.live {
 		w.live[i] = false
 		w.fadeLevels[i] = 0
 	}
-	for i := 0; i < maxLiveCells; i++ {
+	for i := 0; i < maxLive; i++ {
 		x := rand.Intn(w.width)
 		y := rand.Intn(w.height)
 		w.live[y*w.width+x] = true
 	}
+	w.gen = 0
 }
 
 func neighbourCount(a []bool, width, height, x, y int) int {
@@ -118,8 +104,7 @@ func neighbourCount(a []bool, width, height, x, y int) int {
 }
 
 func (w *World) Update() {
-	width := w.width
-	height := w.height
+	width, height := w.width, w.height
 	next := make([]bool, width*height)
 	nextFade := make([]uint8, width*height)
 
@@ -135,7 +120,7 @@ func (w *World) Update() {
 					nextFade[i] = 0
 				} else {
 					next[i] = false
-					nextFade[i] = 1 // start fade
+					nextFade[i] = 1
 				}
 			} else {
 				if pop == 3 {
@@ -150,27 +135,41 @@ func (w *World) Update() {
 	}
 	w.live = next
 	w.fadeLevels = nextFade
+	w.gen++
 }
 
-func (w *World) Draw(pix []byte, hue float64) {
+func (w *World) Draw(pix []byte, hue float64, trails int, whiteOnly bool) {
 	for i, alive := range w.live {
 		var r, g, b uint8
+		alpha := uint8(255)
+
 		if alive {
-			r, g, b = hsvToRGB(hue, 1, 1)
-		} else if w.fadeLevels[i] > 0 {
-			alpha := 1 - float64(w.fadeLevels[i])/float64(FadeGenerations)
-			r, g, b = hsvToRGB(hue-30, 0.8, alpha) // offset hue slightly for ghost color
+			if whiteOnly {
+				r, g, b = 255, 255, 255
+			} else {
+				r, g, b = hsvToRGB(hue, 1, 1)
+			}
+		} else if w.fadeLevels[i] > 0 && trails > 0 {
+			a := 1.0 - float64(w.fadeLevels[i])/float64(trails)
+			if a < 0 {
+				a = 0
+			}
+			alpha = uint8(a * 255)
+			if whiteOnly {
+				r, g, b = 255, 255, 255
+			} else {
+				r, g, b = hsvToRGB(hue-30, 0.8, a)
+			}
 		} else {
 			r, g, b = 0, 0, 0
 		}
+
 		pix[4*i] = r
 		pix[4*i+1] = g
 		pix[4*i+2] = b
-		pix[4*i+3] = 0xff
+		pix[4*i+3] = alpha
 	}
 }
-
-// ------------------------ Game ------------------------
 
 type Game struct {
 	world        *World
@@ -179,35 +178,100 @@ type Game struct {
 	lastW, lastH int
 	lastUpdate   time.Time
 	hue          float64
+	trails       int
+	whiteOnly    bool
+	paused       bool
+	lastKeyTime  time.Time
 }
 
 func (g *Game) Update() error {
-	// Quit on Q or ESC
+	now := time.Now()
+	cooldown := now.Sub(g.lastKeyTime).Milliseconds() > KeyCooldownMs
+
+	ids := ebiten.GamepadIDs()
+
+	// Reset on input or controller A (button 1)
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) || (len(ids) > 0 && ebiten.IsGamepadButtonPressed(ids[0], 1)) {
+		g.world = NewWorld(g.lastW, g.lastH, 0)
+		g.lastKeyTime = now
+	}
+
+	// Quit
 	if ebiten.IsKeyPressed(ebiten.KeyQ) || ebiten.IsKeyPressed(ebiten.KeyEscape) {
 		return ebiten.Termination
 	}
 
-	// Restart on any input
-	mouseClicked := ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) ||
-		ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) ||
-		ebiten.IsMouseButtonPressed(ebiten.MouseButtonMiddle)
-	touches := ebiten.AppendTouchIDs(nil)
-	keys := ebiten.AppendInputChars(nil)
-	if mouseClicked || len(touches) > 0 || len(keys) > 0 {
-		if g.world != nil {
-			g.world = NewWorld(g.lastW, g.lastH, 0)
+	// Pause toggle
+	if cooldown && (ebiten.IsKeyPressed(ebiten.KeyP) || (len(ids) > 0 && ebiten.IsGamepadButtonPressed(ids[0], 9))) {
+		g.paused = !g.paused
+		g.lastKeyTime = now
+	}
+
+	// Arrow keys with cooldown
+	if cooldown {
+		if ebiten.IsKeyPressed(ebiten.KeyLeft) {
+			g.trails--
+			if g.trails < 0 {
+				g.trails = 0
+			}
+			g.lastKeyTime = now
+		}
+		if ebiten.IsKeyPressed(ebiten.KeyRight) {
+			g.trails++
+			if g.trails > MaxTrails {
+				g.trails = MaxTrails
+			}
+			g.lastKeyTime = now
+		}
+		if ebiten.IsKeyPressed(ebiten.KeyUp) {
+			g.whiteOnly = true
+			g.lastKeyTime = now
+		}
+		if ebiten.IsKeyPressed(ebiten.KeyDown) {
+			g.whiteOnly = false
+			g.lastKeyTime = now
 		}
 	}
 
-	const updatesPerSecond = 8
-	delay := time.Second / updatesPerSecond
+	// Controller axes
+	if len(ids) > 0 {
+		id := ids[0]
+		axisX := ebiten.GamepadAxisValue(id, 0)
+		axisY := ebiten.GamepadAxisValue(id, 1)
+		if cooldown {
+			if axisX < -0.5 {
+				g.trails--
+				if g.trails < 0 {
+					g.trails = 0
+				}
+				g.lastKeyTime = now
+			} else if axisX > 0.5 {
+				g.trails++
+				if g.trails > MaxTrails {
+					g.trails = MaxTrails
+				}
+				g.lastKeyTime = now
+			}
+		}
+		if axisY < -0.5 {
+			g.whiteOnly = true
+		} else if axisY > 0.5 {
+			g.whiteOnly = false
+		}
+	}
+
+	// Update world
+	delay := time.Second / UpdatesPerSecond
 	if time.Since(g.lastUpdate) < delay {
 		return nil
 	}
 	g.lastUpdate = time.Now()
 
-	g.hue += 2 // slowly rotate through rainbow hues
-	g.world.Update()
+	if !g.paused {
+		g.hue += 2
+		g.world.Update()
+	}
+
 	return nil
 }
 
@@ -216,13 +280,26 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		screen.Fill(color.Black)
 		return
 	}
-	g.world.Draw(g.worldPixels, g.hue)
+	g.world.Draw(g.worldPixels, g.hue, g.trails, g.whiteOnly)
 	g.worldImage.WritePixels(g.worldPixels)
+
 	screen.Fill(color.Black)
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Scale(float64(CellSize), float64(CellSize))
 	op.Filter = ebiten.FilterNearest
 	screen.DrawImage(g.worldImage, op)
+
+	mode := "RAINBOW"
+	if g.whiteOnly {
+		mode = "WHITE"
+	}
+	txt := fmt.Sprintf("Trails: %d | Mode: %s | Generation: %d | %s", g.trails, mode, g.world.gen, func() string {
+		if g.paused {
+			return "PAUSED"
+		}
+		return ""
+	}())
+	ebitenutil.DebugPrintAt(screen, txt, 10, screen.Bounds().Dy()-20)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
