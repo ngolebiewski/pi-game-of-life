@@ -9,8 +9,8 @@
 //   - Optional white mode
 //   - Adjustable trails (0–100) with smooth fading
 //   - Gamepad + keyboard input support
-//   - Pause, reset, and adjustable seed density controls
-//
+//   - Pause, reset, adjustable seed density, and variable speed
+//   - Adjustable cell size (zoom levels)
 // Built using Ebitengine (https://ebitengine.org/) + ChatGPT
 //
 // License: Apache-2.0
@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	CellSize         = 32
+	CellSizeDefault  = 32
 	DefaultFraction  = 0.33
 	MaxTrails        = 100
 	FadeGenerations  = 5
@@ -39,6 +39,8 @@ const (
 	MinFraction      = 0.1
 	MaxFraction      = 0.9
 	FractionStep     = 0.05
+	MinUPS           = 1
+	MaxUPS           = 60
 )
 
 func hsvToRGB(h, s, v float64) (r, g, b uint8) {
@@ -170,7 +172,7 @@ func (w *World) Draw(pix []byte, hue float64, trails int, whiteOnly bool) {
 			} else {
 				r, g, b = hsvToRGB(hue, 1, 1)
 			}
-		} else if w.fadeLevels[i] > 0 && trails > 0 {
+		} else if trails > 0 && w.fadeLevels[i] > 0 {
 			a := 1.0 - float64(w.fadeLevels[i])/float64(trails)
 			if a < 0 {
 				a = 0
@@ -193,31 +195,34 @@ func (w *World) Draw(pix []byte, hue float64, trails int, whiteOnly bool) {
 }
 
 type Game struct {
-	world        *World
-	worldImage   *ebiten.Image
-	worldPixels  []byte
-	lastW, lastH int
-	lastUpdate   time.Time
-	hue          float64
-	trails       int
-	whiteOnly    bool
-	paused       bool
-	lastKeyTime  time.Time
-	initFraction float64
+	world          *World
+	worldImage     *ebiten.Image
+	worldPixels    []byte
+	lastW, lastH   int
+	lastUpdate     time.Time
+	hue            float64
+	trails         int
+	whiteOnly      bool
+	paused         bool
+	lastKeyTime    time.Time
+	initFraction   float64
+	cellSize       int
+	ups            int
+	pendingRestart bool // for increasing.decreasing cell sizes so it doesn't crash mid generation
 }
 
 func (g *Game) Update() error {
 	now := time.Now()
 	cooldown := now.Sub(g.lastKeyTime).Milliseconds() > KeyCooldownMs
-
 	ids := ebiten.GamepadIDs()
 
 	// ===== Reset (no cooldown) =====
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) ||
 		ebiten.IsKeyPressed(ebiten.KeySpace) ||
-		(len(ids) > 0 && ebiten.IsGamepadButtonPressed(ids[0], 1)) {
+		(len(ids) > 0 && ebiten.IsGamepadButtonPressed(ids[0], 1)) ||
+		g.pendingRestart {
 		g.world = NewWorld(g.lastW, g.lastH, g.initFraction)
-		// don't update lastKeyTime here
+		g.pendingRestart = false
 	}
 
 	// Quit
@@ -233,8 +238,8 @@ func (g *Game) Update() error {
 			g.lastKeyTime = now
 		}
 
-		// White/Rainbow toggle with cooldown
-		if cooldown && (ebiten.IsKeyPressed(ebiten.KeyEnter) || (len(ids) > 0 && ebiten.IsGamepadButtonPressed(ids[0], 8))) {
+		// White/Rainbow toggle
+		if ebiten.IsKeyPressed(ebiten.KeyEnter) || (len(ids) > 0 && ebiten.IsGamepadButtonPressed(ids[0], 8)) {
 			g.whiteOnly = !g.whiteOnly
 			g.lastKeyTime = now
 		}
@@ -271,23 +276,50 @@ func (g *Game) Update() error {
 			g.lastKeyTime = now
 		}
 
-		// Controller axes for trails (optional)
-		if len(ids) > 0 {
-			id := ids[0]
-			axisX := ebiten.GamepadAxisValue(id, 0)
-			if axisX < -0.5 {
-				g.trails--
-				if g.trails < 0 {
-					g.trails = 0
-				}
-				g.lastKeyTime = now
-			} else if axisX > 0.5 {
-				g.trails++
-				if g.trails > MaxTrails {
-					g.trails = MaxTrails
-				}
-				g.lastKeyTime = now
+		// Speed control: + and -
+		if ebiten.IsKeyPressed(ebiten.KeyEqual) {
+			g.ups++
+			if g.ups > MaxUPS {
+				g.ups = MaxUPS
 			}
+			g.lastKeyTime = now
+		}
+		if ebiten.IsKeyPressed(ebiten.KeyMinus) {
+			g.ups--
+			if g.ups < MinUPS {
+				g.ups = MinUPS
+			}
+			g.lastKeyTime = now
+		}
+
+		// Cell size control: [ and ]
+		if ebiten.IsKeyPressed(ebiten.KeyLeftBracket) {
+			switch g.cellSize {
+			case 128:
+				g.cellSize = 64
+			case 64:
+				g.cellSize = 32
+			case 32:
+				g.cellSize = 16
+			case 16:
+				g.cellSize = 8
+			}
+			g.pendingRestart = true
+			g.lastKeyTime = now
+		}
+		if ebiten.IsKeyPressed(ebiten.KeyRightBracket) {
+			switch g.cellSize {
+			case 8:
+				g.cellSize = 16
+			case 16:
+				g.cellSize = 32
+			case 32:
+				g.cellSize = 64
+			case 64:
+				g.cellSize = 128
+			}
+			g.pendingRestart = true
+			g.lastKeyTime = now
 		}
 	}
 
@@ -311,7 +343,7 @@ func (g *Game) Update() error {
 	}
 
 	// ===== Update world =====
-	delay := time.Second / UpdatesPerSecond
+	delay := time.Second / time.Duration(g.ups)
 	if time.Since(g.lastUpdate) < delay {
 		return nil
 	}
@@ -335,7 +367,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	screen.Fill(color.Black)
 	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Scale(float64(CellSize), float64(CellSize))
+	op.GeoM.Scale(float64(g.cellSize), float64(g.cellSize))
 	op.Filter = ebiten.FilterNearest
 	screen.DrawImage(g.worldImage, op)
 
@@ -343,18 +375,22 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	if g.whiteOnly {
 		mode = "WHITE"
 	}
-	txt := fmt.Sprintf("Trails: %d | Mode: %s | Generation: %d | Fraction: %.2f | %s", g.trails, mode, g.world.gen, g.initFraction, func() string {
-		if g.paused {
-			return "PAUSED"
-		}
-		return ""
-	}())
+	txt := fmt.Sprintf(
+		"Trails: %d | Mode: %s | Gen: %d | Fraction: %.2f | UPS: %d | Cell: %d | %s",
+		g.trails, mode, g.world.gen, g.initFraction, g.ups, g.cellSize,
+		func() string {
+			if g.paused {
+				return "PAUSED"
+			}
+			return ""
+		}(),
+	)
 	ebitenutil.DebugPrintAt(screen, txt, 10, screen.Bounds().Dy()-20)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
-	worldW := outsideWidth / CellSize
-	worldH := outsideHeight / CellSize
+	worldW := outsideWidth / g.cellSize
+	worldH := outsideHeight / g.cellSize
 	if worldW <= 0 {
 		worldW = 1
 	}
@@ -375,9 +411,11 @@ func main() {
 	rand.Seed(time.Now().UnixNano())
 	g := &Game{
 		initFraction: DefaultFraction,
+		cellSize:     CellSizeDefault,
+		ups:          UpdatesPerSecond,
 	}
 	ebiten.SetFullscreen(true)
-	ebiten.SetWindowTitle("Nick Golebiewski: RainbowGame of Life — Ebitengine Experimental")
+	ebiten.SetWindowTitle("Nick Golebiewski: Rainbow Game of Life — Ebitengine Experimental")
 	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)
 	}
