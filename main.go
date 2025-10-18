@@ -1,3 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2015 Martin Lindhe
+// SPDX-FileCopyrightText: 2016 The Ebitengine Authors
+// SPDX-FileCopyrightText: 2025 Nick Golebiewski
+
+// The original project is gol (https://github.com/martinlindhe/gol) by Martin Lindhe.
+// This version, "Rainbow Game of Life," extends the original with:
+//   - Dynamic rainbow color cycling
+//   - Optional white mode
+//   - Adjustable trails (0–100) with smooth fading
+//   - Gamepad + keyboard input support
+//   - Pause, reset, and adjustable seed density controls
+//
+// Built using Ebitengine (https://ebitengine.org/) + ChatGPT
+//
+// License: Apache-2.0
+
 package main
 
 import (
@@ -360,7 +377,7 @@ func main() {
 		initFraction: DefaultFraction,
 	}
 	ebiten.SetFullscreen(true)
-	ebiten.SetWindowTitle("Rainbow Life — Ebiten Experimental")
+	ebiten.SetWindowTitle("Nick Golebiewski: RainbowGame of Life — Ebitengine Experimental")
 	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)
 	}
