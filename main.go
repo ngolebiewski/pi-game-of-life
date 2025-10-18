@@ -14,11 +14,11 @@ import (
 
 const (
 	CellSize            = 32
-	InitialLiveFraction = 0.50
+	InitialLiveFraction = 0.33
 	MaxTrails           = 100
 	FadeGenerations     = 5
 	UpdatesPerSecond    = 8
-	KeyCooldownMs       = 150
+	KeyCooldownMs       = 50
 )
 
 func hsvToRGB(h, s, v float64) (r, g, b uint8) {
@@ -191,7 +191,10 @@ func (g *Game) Update() error {
 	ids := ebiten.GamepadIDs()
 
 	// Reset on input or controller A (button 1)
-	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) || (len(ids) > 0 && ebiten.IsGamepadButtonPressed(ids[0], 1)) {
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) ||
+		ebiten.IsKeyPressed(ebiten.KeySpace) ||
+		ebiten.IsKeyPressed(ebiten.KeyR) ||
+		(len(ids) > 0 && ebiten.IsGamepadButtonPressed(ids[0], 1)) {
 		g.world = NewWorld(g.lastW, g.lastH, 0)
 		g.lastKeyTime = now
 	}
