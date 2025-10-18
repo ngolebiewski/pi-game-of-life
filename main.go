@@ -13,12 +13,15 @@ import (
 )
 
 const (
-	CellSize            = 32
-	InitialLiveFraction = 0.33
-	MaxTrails           = 100
-	FadeGenerations     = 5
-	UpdatesPerSecond    = 8
-	KeyCooldownMs       = 50
+	CellSize         = 32
+	DefaultFraction  = 0.33
+	MaxTrails        = 100
+	FadeGenerations  = 5
+	UpdatesPerSecond = 8
+	KeyCooldownMs    = 100
+	MinFraction      = 0.1
+	MaxFraction      = 0.9
+	FractionStep     = 0.05
 )
 
 func hsvToRGB(h, s, v float64) (r, g, b uint8) {
@@ -55,7 +58,7 @@ type World struct {
 	gen        int
 }
 
-func NewWorld(width, height, maxLive int) *World {
+func NewWorld(width, height int, fraction float64) *World {
 	w := &World{
 		live:       make([]bool, width*height),
 		fadeLevels: make([]uint8, width*height),
@@ -63,14 +66,15 @@ func NewWorld(width, height, maxLive int) *World {
 		height:     height,
 		gen:        0,
 	}
-	w.init(maxLive)
+	w.init(fraction)
 	return w
 }
 
-func (w *World) init(maxLive int) {
-	if maxLive <= 0 {
-		maxLive = int(float64(w.width*w.height) * InitialLiveFraction)
+func (w *World) init(fraction float64) {
+	if fraction <= 0 {
+		fraction = DefaultFraction
 	}
+	maxLive := int(float64(w.width*w.height) * fraction)
 	for i := range w.live {
 		w.live[i] = false
 		w.fadeLevels[i] = 0
@@ -182,6 +186,7 @@ type Game struct {
 	whiteOnly    bool
 	paused       bool
 	lastKeyTime  time.Time
+	initFraction float64
 }
 
 func (g *Game) Update() error {
@@ -190,13 +195,12 @@ func (g *Game) Update() error {
 
 	ids := ebiten.GamepadIDs()
 
-	// Reset on input or controller A (button 1)
+	// ===== Reset (no cooldown) =====
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) ||
 		ebiten.IsKeyPressed(ebiten.KeySpace) ||
-		ebiten.IsKeyPressed(ebiten.KeyR) ||
 		(len(ids) > 0 && ebiten.IsGamepadButtonPressed(ids[0], 1)) {
-		g.world = NewWorld(g.lastW, g.lastH, 0)
-		g.lastKeyTime = now
+		g.world = NewWorld(g.lastW, g.lastH, g.initFraction)
+		// don't update lastKeyTime here
 	}
 
 	// Quit
@@ -204,14 +208,21 @@ func (g *Game) Update() error {
 		return ebiten.Termination
 	}
 
-	// Pause toggle
-	if cooldown && (ebiten.IsKeyPressed(ebiten.KeyP) || (len(ids) > 0 && ebiten.IsGamepadButtonPressed(ids[0], 9))) {
-		g.paused = !g.paused
-		g.lastKeyTime = now
-	}
-
-	// Arrow keys with cooldown
+	// ===== Pausable & Adjustable actions (with cooldown) =====
 	if cooldown {
+		// Pause toggle
+		if ebiten.IsKeyPressed(ebiten.KeyP) || (len(ids) > 0 && ebiten.IsGamepadButtonPressed(ids[0], 9)) {
+			g.paused = !g.paused
+			g.lastKeyTime = now
+		}
+
+		// White/Rainbow toggle with cooldown
+		if cooldown && (ebiten.IsKeyPressed(ebiten.KeyEnter) || (len(ids) > 0 && ebiten.IsGamepadButtonPressed(ids[0], 8))) {
+			g.whiteOnly = !g.whiteOnly
+			g.lastKeyTime = now
+		}
+
+		// Trails adjustments
 		if ebiten.IsKeyPressed(ebiten.KeyLeft) {
 			g.trails--
 			if g.trails < 0 {
@@ -226,22 +237,27 @@ func (g *Game) Update() error {
 			}
 			g.lastKeyTime = now
 		}
+
+		// Fraction adjustments
 		if ebiten.IsKeyPressed(ebiten.KeyUp) {
-			g.whiteOnly = true
+			g.initFraction += FractionStep
+			if g.initFraction > MaxFraction {
+				g.initFraction = MaxFraction
+			}
 			g.lastKeyTime = now
 		}
 		if ebiten.IsKeyPressed(ebiten.KeyDown) {
-			g.whiteOnly = false
+			g.initFraction -= FractionStep
+			if g.initFraction < MinFraction {
+				g.initFraction = MinFraction
+			}
 			g.lastKeyTime = now
 		}
-	}
 
-	// Controller axes
-	if len(ids) > 0 {
-		id := ids[0]
-		axisX := ebiten.GamepadAxisValue(id, 0)
-		axisY := ebiten.GamepadAxisValue(id, 1)
-		if cooldown {
+		// Controller axes for trails (optional)
+		if len(ids) > 0 {
+			id := ids[0]
+			axisX := ebiten.GamepadAxisValue(id, 0)
 			if axisX < -0.5 {
 				g.trails--
 				if g.trails < 0 {
@@ -256,14 +272,28 @@ func (g *Game) Update() error {
 				g.lastKeyTime = now
 			}
 		}
+	}
+
+	// Controller axes for fraction adjustments (with cooldown)
+	if len(ids) > 0 && cooldown {
+		id := ids[0]
+		axisY := ebiten.GamepadAxisValue(id, 1)
 		if axisY < -0.5 {
-			g.whiteOnly = true
+			g.initFraction += FractionStep
+			if g.initFraction > MaxFraction {
+				g.initFraction = MaxFraction
+			}
+			g.lastKeyTime = now
 		} else if axisY > 0.5 {
-			g.whiteOnly = false
+			g.initFraction -= FractionStep
+			if g.initFraction < MinFraction {
+				g.initFraction = MinFraction
+			}
+			g.lastKeyTime = now
 		}
 	}
 
-	// Update world
+	// ===== Update world =====
 	delay := time.Second / UpdatesPerSecond
 	if time.Since(g.lastUpdate) < delay {
 		return nil
@@ -296,7 +326,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	if g.whiteOnly {
 		mode = "WHITE"
 	}
-	txt := fmt.Sprintf("Trails: %d | Mode: %s | Generation: %d | %s", g.trails, mode, g.world.gen, func() string {
+	txt := fmt.Sprintf("Trails: %d | Mode: %s | Generation: %d | Fraction: %.2f | %s", g.trails, mode, g.world.gen, g.initFraction, func() string {
 		if g.paused {
 			return "PAUSED"
 		}
@@ -315,7 +345,7 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 		worldH = 1
 	}
 	if g.world == nil || worldW != g.lastW || worldH != g.lastH {
-		g.world = NewWorld(worldW, worldH, 0)
+		g.world = NewWorld(worldW, worldH, g.initFraction)
 		g.worldImage = ebiten.NewImage(worldW, worldH)
 		g.worldPixels = make([]byte, 4*worldW*worldH)
 		g.lastW = worldW
@@ -326,7 +356,9 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
-	g := &Game{}
+	g := &Game{
+		initFraction: DefaultFraction,
+	}
 	ebiten.SetFullscreen(true)
 	ebiten.SetWindowTitle("Rainbow Life — Ebiten Experimental")
 	if err := ebiten.RunGame(g); err != nil {
