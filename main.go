@@ -340,6 +340,24 @@ func (g *Game) Update() error {
 			}
 			g.lastKeyTime = now
 		}
+
+		axisX := ebiten.GamepadAxisValue(id, 0)
+		if cooldown {
+			if axisX < -0.5 {
+				g.trails--
+				if g.trails < 0 {
+					g.trails = 0
+				}
+				g.lastKeyTime = now
+			} else if axisX > 0.5 {
+				g.trails++
+				if g.trails > MaxTrails {
+					g.trails = MaxTrails
+				}
+				g.lastKeyTime = now
+			}
+		}
+
 	}
 
 	// ===== Update world =====
