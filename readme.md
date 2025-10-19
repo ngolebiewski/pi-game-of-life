@@ -25,3 +25,18 @@ Zero Player Game
 | Speed              | + / -                 | N/A                  |
 | Cell Size          | [ / ]                 | N/A                  |
 | Quit               | Q / Esc               | N/A                  |
+
+
+## Compile binary
+1. git clone this repo
+2. make sure you have go
+3. go mod tidy
+4. go build
+
+## Compiling for the web
+https://ebitengine.org/en/documents/webassembly.html
+
+## Build WASM
+1. `go build -o pi-game-of-life.wasm` from project folder.
+2. `cp $(go env GOROOT)/lib/wasm/wasm_exec.js .`
+

@@ -1,0 +1,9 @@
+<!DOCTYPE html>
+<title>Nick Golebiewski X Game of Life</title>
+<script src="wasm_exec.js"></script>
+<script>
+const go = new Go();
+WebAssembly.instantiateStreaming(fetch("pi-game-of-life.wasm"), go.importObject).then(result => {
+    go.run(result.instance);
+});
+</script>
