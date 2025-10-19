@@ -303,12 +303,16 @@ func (g *Game) Update() error {
 				g.cellSize = 16
 			case 16:
 				g.cellSize = 8
+			case 8:
+				g.cellSize = 1
 			}
 			g.pendingRestart = true
 			g.lastKeyTime = now
 		}
 		if ebiten.IsKeyPressed(ebiten.KeyRightBracket) {
 			switch g.cellSize {
+			case 1:
+				g.cellSize = 8
 			case 8:
 				g.cellSize = 16
 			case 16:
@@ -356,6 +360,21 @@ func (g *Game) Update() error {
 				}
 				g.lastKeyTime = now
 			}
+
+			// Controller: B button cycles cell sizes (looping) // FIX AT SOME POINT!
+			// if ebiten.IsKeyPressed(ebiten.KeyB) || ebiten.IsGamepadButtonPressed(ids[0], 1) { // B button
+			// 	sizes := []int{1, 8, 16, 32, 64, 128}
+			// 	next := 0
+			// 	for i, s := range sizes {
+			// 		if s == g.cellSize {
+			// 			next = (i + 1) % len(sizes)
+			// 			break
+			// 		}
+			// 	}
+			// 	g.cellSize = sizes[next]
+			// 	g.pendingRestart = true
+			// 	g.lastKeyTime = now
+			// }
 		}
 
 	}
@@ -394,7 +413,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		mode = "WHITE"
 	}
 	txt := fmt.Sprintf(
-		"Trails: %d | Mode: %s | Gen: %d | Fraction: %.2f | UPS: %d | Cell: %d | %s",
+		"<--/--> Trails: %d | <enter> Mode: %s | Gen: %d | <up/down> Fraction: %.2f | +/- UPS: %d | [ ] Cell Size: %d | <p> pause %s | <space> Restart",
 		g.trails, mode, g.world.gen, g.initFraction, g.ups, g.cellSize,
 		func() string {
 			if g.paused {
@@ -403,7 +422,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			return ""
 		}(),
 	)
-	ebitenutil.DebugPrintAt(screen, txt, 10, screen.Bounds().Dy()-20)
+	ebitenutil.DebugPrintAt(screen, txt, 40, screen.Bounds().Dy()-20)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
