@@ -58,7 +58,6 @@ const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/
 const startButton = document.getElementById('startButton');
 
 function loadWasm() {
-startButton.classList.add('hidden');
 const go = new Go();
 if (!WebAssembly.instantiateStreaming) {
 // Safari polyfill
@@ -68,7 +67,10 @@ return await WebAssembly.instantiate(source, importObject);
 };
 }
 WebAssembly.instantiateStreaming(fetch("pi-game-of-life.wasm"), go.importObject)
-.then(result => go.run(result.instance))
+.then(result => {
+go.run(result.instance);
+startButton.classList.add('hidden');
+})
 .catch(err => {
 document.body.innerHTML = "<pre style='color:white'>" + err + "</pre>";
 console.error(err);
@@ -76,17 +78,9 @@ console.error(err);
 }
 
 if (isMobile) {
-// Auto-load but show button to start rendering
-loadWasm();
-// Show button after a brief delay to ensure WASM is loaded
-setTimeout(() => {
+// Show button and wait for user to click
 startButton.classList.remove('hidden');
-}, 1000);
-startButton.addEventListener('click', () => {
-startButton.classList.add('hidden');
-// Trigger a click or touch event to start the game
-document.body.click();
-});
+startButton.addEventListener('click', loadWasm);
 } else {
 // Auto-load on desktop
 loadWasm();
