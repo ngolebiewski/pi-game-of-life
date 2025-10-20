@@ -1,43 +1,96 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nick Golebiewski × Game of Life</title>
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      background: black;
-      height: 100%;
-      overflow: hidden;
-    }
-    canvas {
-      width: 100%;
-      height: 100%;
-      display: block;
-      touch-action: none;
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nick Golebiewski × Game of Life</title>
+<style>
+html, body {
+margin: 0;
+padding: 0;
+background: black;
+height: 100%;
+overflow: hidden;
+font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+canvas {
+width: 100%;
+height: 100%;
+display: block;
+touch-action: none;
+}
+#startButton {
+position: absolute;
+top: 50%;
+left: 50%;
+transform: translate(-50%, -50%);
+padding: 20px 40px;
+font-size: 18px;
+background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+color: white;
+border: none;
+border-radius: 12px;
+cursor: pointer;
+box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+transition: all 0.3s ease;
+z-index: 1000;
+}
+#startButton:hover {
+transform: translate(-50%, -50%) scale(1.05);
+box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+}
+#startButton:active {
+transform: translate(-50%, -50%) scale(0.98);
+}
+.hidden {
+display: none;
+}
+</style>
 </head>
 <body>
-  <script src="wasm_exec.js"></script>
-  <script>
-    const go = new Go();
-    if (!WebAssembly.instantiateStreaming) {
-      // Safari polyfill
-      WebAssembly.instantiateStreaming = async (resp, importObject) => {
-        const source = await (await resp).arrayBuffer();
-        return await WebAssembly.instantiate(source, importObject);
-      };
-    }
+<button id="startButton" class="hidden">Start Game of Life</button>
 
-    WebAssembly.instantiateStreaming(fetch("pi-game-of-life.wasm"), go.importObject)
-      .then(result => go.run(result.instance))
-      .catch(err => {
-        document.body.innerHTML = "<pre style='color:white'>" + err + "</pre>";
-        console.error(err);
-      });
-  </script>
+<script src="wasm_exec.js"></script>
+<script>
+const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) 
+  || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2);
+
+const startButton = document.getElementById('startButton');
+
+function loadWasm() {
+startButton.classList.add('hidden');
+const go = new Go();
+if (!WebAssembly.instantiateStreaming) {
+// Safari polyfill
+WebAssembly.instantiateStreaming = async (resp, importObject) => {
+const source = await (await resp).arrayBuffer();
+return await WebAssembly.instantiate(source, importObject);
+};
+}
+WebAssembly.instantiateStreaming(fetch("pi-game-of-life.wasm"), go.importObject)
+.then(result => go.run(result.instance))
+.catch(err => {
+document.body.innerHTML = "<pre style='color:white'>" + err + "</pre>";
+console.error(err);
+});
+}
+
+if (isMobile) {
+// Auto-load but show button to start rendering
+loadWasm();
+// Show button after a brief delay to ensure WASM is loaded
+setTimeout(() => {
+startButton.classList.remove('hidden');
+}, 1000);
+startButton.addEventListener('click', () => {
+startButton.classList.add('hidden');
+// Trigger a click or touch event to start the game
+document.body.click();
+});
+} else {
+// Auto-load on desktop
+loadWasm();
+}
+</script>
 </body>
 </html>
