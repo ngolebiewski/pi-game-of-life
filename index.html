@@ -1,90 +1,156 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Nick Golebiewski × Game of Life</title>
-<style>
-html, body {
-margin: 0;
-padding: 0;
-background: black;
-height: 100%;
-overflow: hidden;
-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-}
-canvas {
-width: 100%;
-height: 100%;
-display: block;
-touch-action: none;
-}
-#startButton {
-position: absolute;
-top: 50%;
-left: 50%;
-transform: translate(-50%, -50%);
-padding: 20px 40px;
-font-size: 18px;
-background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-color: white;
-border: none;
-border-radius: 12px;
-cursor: pointer;
-box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-transition: all 0.3s ease;
-z-index: 1000;
-}
-#startButton:hover {
-transform: translate(-50%, -50%) scale(1.05);
-box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
-}
-#startButton:active {
-transform: translate(-50%, -50%) scale(0.98);
-}
-.hidden {
-display: none;
-}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nick Golebiewski × Game of Life</title>
+
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      background: black;
+      height: 100%;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+    }
+
+    /* Start button styles */
+    #startButton {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 20px 40px;
+      font-size: 18px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+      transition: all 0.3s ease;
+      z-index: 1000;
+    }
+
+    #startButton:hover {
+      transform: translate(-50%, -50%) scale(1.05);
+      box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+    }
+
+    #startButton:active {
+      transform: translate(-50%, -50%) scale(0.98);
+    }
+
+    .hidden {
+      display: none;
+    }
+  </style>
 </head>
+
 <body>
-<button id="startButton" class="hidden">Start Game of Life</button>
 
-<script src="wasm_exec.js"></script>
-<script>
-const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) 
-  || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2);
+  <!-- Pre-create canvas for mobile WebGL -->
+  <canvas id="gameCanvas"></canvas>
 
-const startButton = document.getElementById('startButton');
+  <!-- Start button (shown only on mobile) -->
+  <!-- <button id="startButton" class="hidden">Start Game of Life</button> -->
+  <button id="startButton" class="hidden">This Game of Life doesn't work on mobile devices.</button>
 
-function loadWasm() {
-const go = new Go();
-if (!WebAssembly.instantiateStreaming) {
-// Safari polyfill
-WebAssembly.instantiateStreaming = async (resp, importObject) => {
-const source = await (await resp).arrayBuffer();
-return await WebAssembly.instantiate(source, importObject);
-};
+  <!-- Go WASM runner -->
+  <script src="wasm_exec.js"></script>
+
+  <script>
+    /* Tell Ebitengine which canvas to use */
+    globalThis.__ebitenDefaultCanvasElementID = "gameCanvas";
+
+    /* Mobile detection */
+    const isMobile =
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+      || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2);
+
+    const startButton = document.getElementById("startButton");
+
+    async function runWasm() {
+      const go = new Go();
+
+      // Safari polyfill for instantiateStreaming
+      if (!WebAssembly.instantiateStreaming) {
+        WebAssembly.instantiateStreaming = async (resp, importObject) => {
+          const source = await (await resp).arrayBuffer();
+          return await WebAssembly.instantiate(source, importObject);
+        };
+      }
+
+      const result = await WebAssembly.instantiateStreaming(
+        fetch("pi-game-of-life.wasm"),
+        go.importObject
+      );
+
+      go.run(result.instance);
+    }
+
+    /* Desktop: auto-run with Safari WebGL delay */
+    if (!isMobile) {
+      window.addEventListener("load", () => {
+        setTimeout(() => {
+          runWasm().catch(err => {
+            document.body.innerHTML =
+              "<pre style='color:white'>" + err + "</pre>";
+          });
+        }, 50); // <-- the magic delay
+      });
+    }
+
+/* Mobile: require tap */
+else {
+startButton.classList.remove("hidden");
+startButton.addEventListener("click", () => {
+startButton.textContent = "Loading...";
+        
+const canvas = document.getElementById("gameCanvas");
+        
+// Test WebGL availability
+const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+if (!gl) {
+console.error("WebGL not available");
+startButton.textContent = "WebGL not supported";
+startButton.style.background = "#dc3545";
+return;
+        }
+console.log("WebGL context created successfully");
+        
+// Load WASM
+runWasm()
+            .then(() => {
+startButton.classList.add("hidden");
+console.log("WASM loaded successfully");
+            })
+            .catch(err => {
+console.error("WASM error:", err);
+startButton.textContent = "Error - tap to retry";
+startButton.style.background = "#dc3545";
+                
+// Show error on screen
+const errorDiv = document.createElement("div");
+errorDiv.style.cssText = "position:fixed;top:60%;left:50%;transform:translate(-50%,-50%);color:white;background:rgba(0,0,0,0.8);padding:20px;border-radius:8px;max-width:80%;font-size:14px;z-index:999;";
+errorDiv.textContent = err.toString();
+document.body.appendChild(errorDiv);
+            });
+    });
 }
-WebAssembly.instantiateStreaming(fetch("pi-game-of-life.wasm"), go.importObject)
-.then(result => {
-go.run(result.instance);
-startButton.classList.add('hidden');
-})
-.catch(err => {
-document.body.innerHTML = "<pre style='color:white'>" + err + "</pre>";
-console.error(err);
-});
-}
 
-if (isMobile) {
-// Show button and wait for user to click
-startButton.classList.remove('hidden');
-startButton.addEventListener('click', loadWasm);
-} else {
-// Auto-load on desktop
-loadWasm();
-}
-</script>
+  </script>
+
 </body>
+
 </html>

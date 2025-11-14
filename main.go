@@ -126,7 +126,7 @@ func neighbourCount(a []bool, width, height, x, y int) int {
 	return c
 }
 
-func (w *World) Update() {
+func (w *World) Update(trails int) {
 	width, height := w.width, w.height
 	next := make([]bool, width*height)
 	nextFade := make([]uint8, width*height)
@@ -149,7 +149,7 @@ func (w *World) Update() {
 				if pop == 3 {
 					next[i] = true
 					nextFade[i] = 0
-				} else if w.fadeLevels[i] > 0 && w.fadeLevels[i] < FadeGenerations {
+				} else if w.fadeLevels[i] > 0 && w.fadeLevels[i] < uint8(trails) {
 					next[i] = false
 					nextFade[i] = w.fadeLevels[i] + 1
 				}
@@ -388,7 +388,7 @@ func (g *Game) Update() error {
 
 	if !g.paused {
 		g.hue += 2
-		g.world.Update()
+		g.world.Update(g.trails)
 	}
 
 	return nil
@@ -422,7 +422,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			return ""
 		}(),
 	)
-	ebitenutil.DebugPrintAt(screen, txt, 40, screen.Bounds().Dy()-20)
+	ebitenutil.DebugPrintAt(screen, txt, 10, screen.Bounds().Dy()-20)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
